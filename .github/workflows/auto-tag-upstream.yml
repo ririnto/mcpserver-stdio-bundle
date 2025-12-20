@@ -25,12 +25,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import re, sys, urllib.request, xml.etree.ElementTree as ET
+          python3 - <<PY | tee /tmp/upstream_version.txt
+          import re, sys, time, urllib.request, urllib.error, xml.etree.ElementTree as ET
           url = "${METADATA_URL}"
-          data = urllib.request.urlopen(url, timeout=30).read()
+          data = None
+          for attempt in range(1, 4):
+            try:
+              with urllib.request.urlopen(url, timeout=30) as resp:
+                data = resp.read()
+              break
+            except Exception as e:
+              if attempt == 3:
+                print(f"ERROR: failed to download metadata after {attempt} attempts: {e}", file=sys.stderr)
+                sys.exit(1)
+              sleep = 2 ** (attempt - 1)
+              print(f"warning: attempt {attempt} failed: {e}; retrying in {sleep}s", file=sys.stderr)
+              time.sleep(sleep)
           root = ET.fromstring(data)
-          ns = ""  # no namespace expected
+          ns = ""
           release = root.findtext("./versioning/release")
           if not release:
             latest = root.findtext("./versioning/latest")
@@ -43,7 +55,7 @@ jobs:
             print("ERROR: cannot parse a valid upstream version", file=sys.stderr)
             sys.exit(1)
           print(release)
-          PY | tee /tmp/upstream_version.txt
+          PY
           VERSION="$(cat /tmp/upstream_version.txt)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
