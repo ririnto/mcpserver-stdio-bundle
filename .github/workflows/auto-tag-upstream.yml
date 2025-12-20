@@ -1,0 +1,74 @@
+name: auto-tag-upstream-mcpserver
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: { }
+
+permissions:
+  contents: write
+
+env:
+  METADATA_URL: https://www.jetbrains.com/intellij-repository/releases/com/jetbrains/intellij/mcpserver/mcpserver/maven-metadata.xml
+
+jobs:
+  tag-if-new:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine latest upstream version
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, sys, urllib.request, xml.etree.ElementTree as ET
+          url = "${METADATA_URL}"
+          data = urllib.request.urlopen(url, timeout=30).read()
+          root = ET.fromstring(data)
+          ns = ""  # no namespace expected
+          release = root.findtext("./versioning/release")
+          if not release:
+            latest = root.findtext("./versioning/latest")
+            release = latest
+          if not release:
+            versions = [v.text for v in root.findall("./versioning/versions/version") if v.text]
+            if versions:
+              release = versions[-1]
+          if not release or not re.fullmatch(r"[0-9]+(\.[0-9]+)*", release):
+            print("ERROR: cannot parse a valid upstream version", file=sys.stderr)
+            sys.exit(1)
+          print(release)
+          PY | tee /tmp/upstream_version.txt
+          VERSION="$(cat /tmp/upstream_version.txt)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          TAG='${{ steps.upstream.outputs.tag }}'
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push tag
+        if: ${{ steps.exists.outputs.exists == 'false' }}
+        shell: bash
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Upstream mcpserver release $TAG"
+          git push origin "$TAG"
