@@ -51,6 +51,8 @@ Run a prebuilt artifact directly.
 ### Docker (GHCR)
 
 * `--network host` is required so the container can reach the **JetBrains IDE MCP Server** on the host.
+* **Linux only:** Docker host networking works only on Linux. On macOS, the library calls `127.0.0.1` inside the container,
+  which resolves to the container itself, so it cannot reach the IDE MCP Server on the host.
 * Set `IJ_MCP_SERVER_PORT` explicitly to match your IDE configuration.
 * `TZ` and `LANG` are optional but help with consistent timestamps and UTF-8 output.
 
@@ -165,6 +167,8 @@ Symptoms:
 Fix:
 
 * Ensure `--network host` is present (required for this setup).
+* **Linux only:** Docker host networking works only on Linux. On macOS, the library calls `127.0.0.1` inside the container,
+  which resolves to the container itself, so it cannot reach the IDE MCP Server on the host.
 
 ### 5) “It runs but nothing happens”
 
