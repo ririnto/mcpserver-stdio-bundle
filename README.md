@@ -1,14 +1,13 @@
 # mcpserver-stdio-bundle
 
-Single bundled `shadowJar` artifact that embeds the JetBrains MCP stdio server so MCP clients can talk to the
-**JetBrains IDE MCP Server** over **stdio**.
+Use this bundled `shadowJar` artifact to connect MCP clients to the **JetBrains IDE MCP Server** over **stdio**.
 
 ## How it works
 
 MCP Client ⇄ (stdio) ⇄ `mcpserver-stdio-bundle` ⇄ (SSE/HTTP) ⇄ JetBrains IDE MCP Server
 
-This bundle does **not** open its own IDE MCP Server port. It connects to the IDE MCP Server that is already
-enabled in your JetBrains IDE.
+Enable the IDE MCP Server in your JetBrains IDE before starting this bundle.
+The bundle connects to that server and opens no IDE MCP Server port.
 
 Based on:
 
@@ -28,7 +27,7 @@ Run a prebuilt artifact directly.
 * Set `IJ_MCP_SERVER_PORT` to the **JetBrains IDE MCP Server** port.
 * Use an **absolute path** to the JAR.
 * Java runtime must be **JDK 21+**.
-* `mcpserver-stdio-<MCP_VERSION>-bundle.jar`: check `MCP_VERSION` and naming in GitHub Releases.
+* Check [GitHub Releases](https://github.com/ririnto/mcpserver-stdio-bundle/releases) for `mcpserver-stdio-<MCP_VERSION>-bundle.jar`.
 
 ```json
 {
@@ -51,8 +50,10 @@ Run a prebuilt artifact directly.
 ### Docker (GHCR)
 
 * `--network host` is required so the container can reach the **JetBrains IDE MCP Server** on the host.
-* **Linux only:** Docker host networking works only on Linux. On macOS, the library calls `127.0.0.1` inside the container,
-  which resolves to the container itself, so it cannot reach the IDE MCP Server on the host.
+* Use Docker Engine on Linux, or enable host networking in Docker Desktop 4.34 or later.
+* Follow the [Docker host networking setup and limitations](https://docs.docker.com/engine/network/drivers/host/).
+* Without host networking, `127.0.0.1` refers to the container and cannot reach your host IDE.
+* Prefer the Local JAR configuration if your Docker setup cannot share host networking.
 * Set `IJ_MCP_SERVER_PORT` explicitly to match your IDE configuration.
 * `TZ` and `LANG` are optional but help with consistent timestamps and UTF-8 output.
 
@@ -86,15 +87,15 @@ Run a prebuilt artifact directly.
 }
 ```
 
-Note: Avoid setting `LC_ALL` unless you have a specific reason. `LC_ALL` overrides other locale settings and can
-cause unexpected behavior.
+Avoid setting `LC_ALL` unless you need to override the other locale settings.
+That override can cause unexpected behavior.
 
 ---
 
 ## What is `IJ_MCP_SERVER_PORT`?
 
-`IJ_MCP_SERVER_PORT` is the port where your **JetBrains IDE MCP Server** is running (IntelliJ IDEA / PyCharm /
-WebStorm / etc.). It is **not** a port opened by this bundle.
+`IJ_MCP_SERVER_PORT` identifies your running **JetBrains IDE MCP Server** port, for example in IntelliJ IDEA, PyCharm, or WebStorm.
+This bundle opens no port of its own.
 
 You can confirm the port in your IDE:
 
@@ -107,7 +108,7 @@ If your IDE shows a different port, use that value for `IJ_MCP_SERVER_PORT`.
 ### Important behavior difference (Docker vs Local JAR)
 
 * **Docker image:** `IJ_MCP_SERVER_PORT` defaults to `64342` if you don’t provide it.
-* **Local JAR via MCP config:** there is no default. You must set `IJ_MCP_SERVER_PORT` explicitly.
+* **Local JAR via MCP config:** set `IJ_MCP_SERVER_PORT` because the configuration supplies no default.
 
 ---
 
@@ -167,34 +168,72 @@ Symptoms:
 Fix:
 
 * Ensure `--network host` is present (required for this setup).
-* **Linux only:** Docker host networking works only on Linux. On macOS, the library calls `127.0.0.1` inside the container,
-  which resolves to the container itself, so it cannot reach the IDE MCP Server on the host.
+* Check the platform requirements and fallback in [Docker configuration](#docker-ghcr).
 
 ### 5) “It runs but nothing happens”
 
 Checklist:
 
 * MCP config uses `"type": "stdio"`.
-* (Docker) `-i` is present so stdin/stdout are connected.
+* Include Docker’s `-i` option to connect stdin and stdout.
+
+---
+
+## Build from source
+
+Install JDK 21 and use the checked-in Gradle wrapper.
+Choose a published `mcpserver-stdio` dependency version, such as `253.28294.334`.
+The build requires `-PmcpVersion` and has no default dependency version.
+
+```sh
+MCP_VERSION=253.28294.334
+./gradlew --no-daemon clean shadowJar -PmcpVersion="$MCP_VERSION"
+test -f "build/libs/mcpserver-stdio-${MCP_VERSION}-bundle.jar"
+```
+
+Gradle writes `build/libs/mcpserver-stdio-<MCP_VERSION>-bundle.jar` with its dependencies and merged service files.
+Run that JAR using the Local JAR configuration above.
+
+For a local Docker build, pass the versioned JAR path to `JAR_FILE`:
+
+```sh
+docker build \
+  --build-arg "JAR_FILE=build/libs/mcpserver-stdio-${MCP_VERSION}-bundle.jar" \
+  -t "mcpserver-stdio-bundle:${MCP_VERSION}" .
+```
+
+The Dockerfile’s default `JAR_FILE` omits the version and differs from the Gradle output.
+The release workflow supplies this build argument.
+A successful build does not verify a live IDE connection.
 
 ---
 
 ## Release
 
-Suggested tag scheme:
+Use Git tags named `v<MCP_VERSION>`, for example `v253.28294.334`.
+The release workflow removes `v` before passing the dependency version to Gradle.
+It publishes the versioned bundle JAR and Linux amd64/arm64 Docker images.
 
-* `latest`: most recent stable
-* `<MCP_VERSION>`: bundled `com.jetbrains.intellij.mcpserver:mcpserver-stdio` dependency version
+| Reference | Meaning |
+| :--- | --- |
+| Git tag `v<MCP_VERSION>` | The release workflow builds this tagged source. |
+| Image tag `<MCP_VERSION>` | Use this tag for the bundled dependency version. |
+| Image tag `v<MCP_VERSION>` | Use this alias matching the Git tag. |
+| Image tag `latest` | The release workflow updates this alias on each successful image publication. |
 
-Where to verify release/tag versioning and artifact naming:
+The [auto-tag workflow](.github/workflows/auto-tag-upstream.yaml) checks upstream metadata every 12 hours.
+For a new version, it creates a Git tag and dispatches the [release workflow](.github/workflows/release-on-tag.yaml).
+The release workflow also accepts tag pushes and manual dispatch with a tag input.
+Inspect [GitHub Releases](https://github.com/ririnto/mcpserver-stdio-bundle/releases) for published versions and artifact names.
 
-* GitHub Releases: https://github.com/ririnto/mcpserver-stdio-bundle/releases
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for checks, writing conventions, and issue and PR templates.
 
 ---
 
 ## License
 
-Distributed under the Apache License, Version 2.0, in accordance with the license of the JetBrains
-`intellij-community` repository:
+Distributed under the Apache License, Version 2.0, in accordance with the license of the JetBrains `intellij-community` repository:
 
 * [https://github.com/JetBrains/intellij-community](https://github.com/JetBrains/intellij-community)
