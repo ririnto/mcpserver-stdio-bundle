@@ -100,5 +100,5 @@ jobs:
           curl -sS -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release-on-tag.yml/dispatches" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release-on-tag.yaml/dispatches" \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"${TAG}\"}}"
