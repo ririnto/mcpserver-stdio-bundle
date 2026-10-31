@@ -1,0 +1,28 @@
+name: Documentation or maintenance
+description: Define a focused documentation or maintenance change with acceptance criteria.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the current gap and link the relevant source or documentation.
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: >-
+        List the affected files and behavior to preserve.
+        Identify excluded runtime calls, publication steps, or unrelated changes.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance-and-verification
+    attributes:
+      label: Acceptance and verification
+      description: >-
+        Describe the observable completion criteria and relevant checks.
+        Distinguish executed, failed, and NOTRUN checks.
+    validations:
+      required: false

@@ -1,6 +1,6 @@
 ---
-name: Bug report
-about: Report a reproducible build, runtime, release, or documentation problem.
+name: Bug report (Markdown fallback)
+about: Temporary Markdown fallback while the YAML form is being verified.
 title: ""
 labels: ""
 assignees: ""
