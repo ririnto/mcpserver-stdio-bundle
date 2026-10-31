@@ -1,7 +1,7 @@
 # Contributing
 
 Open an issue describing the problem and acceptance criteria before changing behavior.
-Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) or [maintenance template](.github/ISSUE_TEMPLATE/maintenance.yml).
+Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yaml) or [maintenance template](.github/ISSUE_TEMPLATE/maintenance.yaml).
 Keep changes focused on the agreed scope.
 Use synthetic examples and remove credentials, personal paths, and private logs before publishing.
 
