@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible build, runtime, release, or documentation problem.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the observed behavior and expected result.
+    validations:
+      required: false
+  - type: textarea
+    id: reproduction-and-environment
+    attributes:
+      label: Reproduction and environment
+      description: >-
+        Provide minimal steps and the dependency version, Java version, operating system, and execution method.
+        For Docker issues, include the Docker version and host networking setting.
+        Remove credentials, personal paths, and private IDE data from examples.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence-and-acceptance
+    attributes:
+      label: Evidence and acceptance
+      description: >-
+        Include safe error excerpts and the observable condition that would resolve the issue.
+        Distinguish executed, failed, and NOTRUN checks.
+    validations:
+      required: false

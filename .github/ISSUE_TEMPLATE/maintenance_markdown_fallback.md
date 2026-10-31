@@ -1,6 +1,6 @@
 ---
-name: Documentation or maintenance
-about: Define a focused documentation or maintenance change with acceptance criteria.
+name: Documentation or maintenance (Markdown fallback)
+about: Temporary Markdown fallback while the YAML form is being verified.
 title: ""
 labels: ""
 assignees: ""
