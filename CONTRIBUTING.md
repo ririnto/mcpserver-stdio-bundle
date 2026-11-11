@@ -1,6 +1,7 @@
 # Contributing
 
-Open an issue describing the problem and acceptance criteria before changing behavior.
+Issues are optional for implementation, pull requests, and integration.
+Without an issue, record the problem, scope, and acceptance in the task or PR.
 Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yaml) or [maintenance template](.github/ISSUE_TEMPLATE/maintenance.yaml).
 Keep changes focused on the agreed scope.
 Use synthetic examples and remove credentials, personal paths, and private logs before publishing.
@@ -25,7 +26,7 @@ Use the [README](README.md#build-from-source) for local JAR and Docker build com
 
 For documentation changes, check relative links, JSON examples, and rendered headings, lists, and tables.
 For workflow edits, parse YAML and inspect expressions and embedded scripts without executing publication steps.
-Preserve release triggers, schedules, permissions, tag formats, artifact names, and image tags unless the issue authorizes changes.
+Preserve release triggers, schedules, permissions, tag formats, artifact names, and image tags unless the task authorizes changes.
 Keep workflow filename consumers consistent when renaming files.
 GitHub supports `.yaml` and `.yml` workflow extensions, so use `.yaml` for this repository’s workflows.
 See [GitHub’s workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#about-yaml-syntax-for-workflows).
@@ -54,8 +55,8 @@ Validate relative links and JSON examples.
 Live IDE and Docker integration checks are NOTRUN because this change covers documentation.
 ```
 
-Fill the PR template and link the issue and acceptance evidence.
+Fill the PR template, record acceptance evidence, and link an issue when one exists.
 Open an ordinary PR from a feature branch and obtain review of the complete posted changes.
 Resolve blockers and satisfy current repository protection requirements before merging.
-Confirm the changes on `main` before closing the issue.
+Confirm the changes on `main` before closing any related issue.
 Remove completed task branches after verifying that `main` preserves their changes.
