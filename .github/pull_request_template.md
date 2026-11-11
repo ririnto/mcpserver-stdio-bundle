@@ -1,7 +1,7 @@
 ## Problem and result
 
 Explain the concrete problem and resulting behavior.
-Link the issue and its acceptance criteria.
+Record acceptance criteria and link an issue when one exists.
 
 ## Changes and preserved behavior
 
