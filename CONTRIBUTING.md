@@ -24,9 +24,21 @@ Report commands, outcomes, tested versions, and coverage in the [PR template](.g
 Mark unavailable or excluded checks as NOTRUN with a reason.
 Use the [README](README.md#build-from-source) for local JAR and Docker build commands.
 
-For documentation changes, check relative links, JSON examples, and rendered headings, lists, and tables.
+For documentation changes, check:
+
+- Relative links
+- JSON examples
+- Rendered headings, lists, and tables
+
 For workflow edits, parse YAML and inspect expressions and embedded scripts without executing publication steps.
-Preserve release triggers, schedules, permissions, tag formats, artifact names, and image tags unless the task authorizes changes.
+Unless the task authorizes a change, preserve these release settings:
+
+- Triggers and schedules
+- Permissions
+- Tag formats
+- Artifact names
+- Image tags
+
 Keep workflow filename consumers consistent when renaming files.
 GitHub supports `.yaml` and `.yml` workflow extensions, so use `.yaml` for this repository’s workflows.
 See [GitHub’s workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#about-yaml-syntax-for-workflows).
@@ -37,7 +49,15 @@ Do not dispatch releases or publish images as a documentation check.
 Put each complete prose sentence on its own source line.
 Separate paragraphs with blank lines and preserve spaces between words.
 Keep independent sentences separate instead of joining them with punctuation.
-Preserve required code, metadata, quotations, URLs, table syntax, and licenses.
+Preserve required content and syntax:
+
+- Code
+- Metadata
+- Quotations
+- URLs
+- Table syntax
+- Licenses
+
 Exclude generated files and the Gradle wrapper from mechanical writing changes.
 Apply these rules to maintained documentation, contributor guidance, issue and PR prose, and commit bodies.
 
