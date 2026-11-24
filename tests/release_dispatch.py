@@ -27,7 +27,21 @@ def _workflow(name: str) -> dict:
     ]))
 
 
-class _ReleaseDispatchTest(unittest.TestCase):
+class _WorkflowTest(unittest.TestCase):
+    def test_pull_request_validation_is_read_only(self):
+        filename = "validate-pr.yaml"
+        workflow = _workflow(filename)
+        path = f".github/workflows/{filename}"
+        self.assertEqual(list(workflow.get("on") or {}), ["pull_request"],
+                         f"{path}: validation must run only on pull_request")
+
+        read_only = {"contents": "read"}
+        self.assertEqual(workflow.get("permissions"), read_only,
+                         f"{path}: workflow permissions must be contents: read only")
+        for name, job in workflow["jobs"].items():
+            self.assertEqual(job.get("permissions", read_only), read_only,
+                             f"{path}: job {name} permissions must be contents: read only")
+
     def test_dispatch_and_recovery(self):
         auto_steps = _workflow("auto-tag-upstream.yaml")["jobs"]["tag-if-new"]["steps"]
         dispatch = next(step["run"] for step in auto_steps if "/dispatches" in step.get("run", ""))
