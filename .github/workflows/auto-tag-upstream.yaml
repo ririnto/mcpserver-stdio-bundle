@@ -9,6 +9,8 @@ permissions:
   contents: write
   actions: write
 
+concurrency: auto-tag-upstream
+
 env:
   METADATA_URL: https://www.jetbrains.com/intellij-repository/releases/com/jetbrains/intellij/mcpserver/mcpserver/maven-metadata.xml
 
@@ -64,41 +66,56 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Check if tag already exists
-        id: exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --tags --force
-          TAG='${{ steps.upstream.outputs.tag }}'
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create and push tag
-        if: ${{ steps.exists.outputs.exists == 'false' }}
-        shell: bash
-        env:
-          TAG: ${{ steps.upstream.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Upstream mcpserver release $TAG"
-          git push origin "$TAG"
-
-      - name: Dispatch release workflow
-        if: ${{ steps.exists.outputs.exists == 'false' }}
+      - name: Ensure tag and dispatch incomplete release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.upstream.outputs.tag }}
         run: |
           set -euo pipefail
-          curl -sS -X POST \
+          api_url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"
+          response=$(mktemp)
+          trap 'rm -f -- "$response"' EXIT
+          status=$(curl -sS --max-time 30 -o "$response" -w '%{http_code}' \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release-on-tag.yaml/dispatches" \
+            "$api_url/releases/tags/$TAG")
+          case "$status" in
+            200)
+              complete=$(jq -er --arg tag "$TAG" --arg jar "mcpserver-stdio-${TAG#v}-bundle.jar" '
+                if .tag_name != $tag or (.draft | type) != "boolean" or (.assets | type) != "array" then
+                  error("Invalid release response for " + $tag)
+                else
+                  .draft == false and any(.assets[]; .name == $jar and .state == "uploaded" and (.size | type) == "number" and .size > 0)
+                end | tostring' "$response")
+              if [ "$complete" = true ]; then
+                echo "Release $TAG already has its bundle"
+                exit 0
+              fi
+              ;;
+            404) ;;
+            *)
+              echo "ERROR: release lookup for $TAG returned HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG"; then
+            echo "Tag $TAG already exists"
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              exit "$status"
+            fi
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Upstream mcpserver release $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          curl -sS --fail-with-body --max-time 30 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "$api_url/actions/workflows/release-on-tag.yaml/dispatches" \
             -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"${TAG}\"}}"
