@@ -34,6 +34,7 @@ For documentation changes, check:
 - Rendered headings, lists, and tables
 
 For workflow edits, parse YAML and inspect expressions and embedded scripts without executing publication steps.
+Run `python3 tests/release_dispatch.py` with Ruby, Bash, and curl installed to check release dispatch and retry behavior against a loopback fixture.
 Unless the task authorizes a change, preserve these release settings:
 
 - Triggers and schedules

@@ -16,6 +16,8 @@ permissions:
   packages: write
   id-token: write
 
+concurrency: release-${{ inputs.tag || github.ref_name }}
+
 env:
   PROJECT_NAME: mcpserver-stdio-bundle
   JAR_BASENAME: mcpserver-stdio
@@ -25,13 +27,16 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve tag
-        id: ref
+      - name: Resolve tag and check for published release
+        id: release
         shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="${{ inputs.tag }}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF_NAME}"
           fi
@@ -40,31 +45,44 @@ jobs:
             echo "ERROR: tag is empty" >&2
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout tag
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.ref.outputs.tag }}
-          fetch-depth: 0
-
-      - name: Validate tag and extract version
-        id: ver
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="${{ steps.ref.outputs.tag }}"
           if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
             echo "ERROR: invalid tag '$TAG' (expected: v<digits(.digits)*>)" >&2
             exit 1
           fi
           VERSION="${TAG#v}"
-          JAR="${{ env.JAR_BASENAME }}-${VERSION}-${{ env.CLASSIFIER }}.jar"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "jar=$JAR" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "jar=$JAR_BASENAME-$VERSION-$CLASSIFIER.jar"
+          } >> "$GITHUB_OUTPUT"
+
+          status=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          case "$status" in
+            200)
+              echo "Release $TAG already exists"
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "ERROR: release lookup for $TAG returned HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout tag
+        if: ${{ steps.release.outputs.published == 'false' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
 
       - name: Set up JDK 21
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -72,20 +90,23 @@ jobs:
           cache: gradle
 
       - name: Build bundle jar (shadowJar only)
+        if: ${{ steps.release.outputs.published == 'false' }}
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon clean shadowJar -PmcpVersion='${{ steps.ver.outputs.version }}'
-          test -f "build/libs/${{ steps.ver.outputs.jar }}"
+          ./gradlew --no-daemon clean shadowJar -PmcpVersion='${{ steps.release.outputs.version }}'
+          test -f "build/libs/${{ steps.release.outputs.jar }}"
 
       - name: Upload workflow artifact
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.ver.outputs.jar }}
-          path: build/libs/${{ steps.ver.outputs.jar }}
+          name: ${{ steps.release.outputs.jar }}
+          path: build/libs/${{ steps.release.outputs.jar }}
           if-no-files-found: error
 
       - name: Log in to GitHub Container Registry
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -93,9 +114,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,33 +127,36 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: true
           sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
-            JAR_FILE=build/libs/${{ steps.ver.outputs.jar }}
+            JAR_FILE=build/libs/${{ steps.release.outputs.jar }}
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
-            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ steps.release.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ steps.release.outputs.tag }}
             ghcr.io/${{ github.repository }}:latest
 
       - name: Create GitHub Release (bundle + docker)
+        if: ${{ steps.release.outputs.published == 'false' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: ${{ env.PROJECT_NAME }} ${{ steps.ver.outputs.tag }}
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ env.PROJECT_NAME }} ${{ steps.release.outputs.tag }}
           generate_release_notes: false
-          files: build/libs/${{ steps.ver.outputs.jar }}
+          files: build/libs/${{ steps.release.outputs.jar }}
           body: |
             **Bundle (fat JAR)** for IntelliJ MCP stdio runner.
 
             Run:
-            `java -jar ${{ steps.ver.outputs.jar }}`
+            `java -jar ${{ steps.release.outputs.jar }}`
 
             **Docker image** (GHCR):
-            - `ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}`
-            - `ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.tag }}`
+            - `ghcr.io/${{ github.repository }}:${{ steps.release.outputs.version }}`
+            - `ghcr.io/${{ github.repository }}:${{ steps.release.outputs.tag }}`
             - `ghcr.io/${{ github.repository }}:latest`
 
             - Project: **${{ env.PROJECT_NAME }}**
-            - Version: **${{ steps.ver.outputs.version }}**
+            - Version: **${{ steps.release.outputs.version }}**
             - Packaging: **bundle / fat JAR (zip64 enabled)**
             - Main-Class: `com.intellij.mcpserver.stdio.McpStdioRunnerKt`
         env:
