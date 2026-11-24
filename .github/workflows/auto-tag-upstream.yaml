@@ -66,7 +66,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure tag and dispatch unpublished release
+      - name: Ensure tag and dispatch incomplete release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,14 +74,24 @@ jobs:
         run: |
           set -euo pipefail
           api_url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"
-          status=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+          response=$(mktemp)
+          trap 'rm -f -- "$response"' EXIT
+          status=$(curl -sS --max-time 30 -o "$response" -w '%{http_code}' \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "$api_url/releases/tags/$TAG")
           case "$status" in
             200)
-              echo "Release $TAG already exists"
-              exit 0
+              complete=$(jq -er --arg tag "$TAG" --arg jar "mcpserver-stdio-${TAG#v}-bundle.jar" '
+                if .tag_name != $tag or (.draft | type) != "boolean" or (.assets | type) != "array" then
+                  error("Invalid release response for " + $tag)
+                else
+                  .draft == false and any(.assets[]; .name == $jar and .state == "uploaded" and (.size | type) == "number" and .size > 0)
+                end | tostring' "$response")
+              if [ "$complete" = true ]; then
+                echo "Release $TAG already has its bundle"
+                exit 0
+              fi
               ;;
             404) ;;
             *)

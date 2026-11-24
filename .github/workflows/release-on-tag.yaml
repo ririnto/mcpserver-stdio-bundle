@@ -22,12 +22,13 @@ env:
   PROJECT_NAME: mcpserver-stdio-bundle
   JAR_BASENAME: mcpserver-stdio
   CLASSIFIER: bundle
+  REGISTRY_URL: https://ghcr.io
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve tag and check for published release
+      - name: Check release and image state
         id: release
         shell: bash
         env:
@@ -49,40 +50,123 @@ jobs:
             echo "ERROR: invalid tag '$TAG' (expected: v<digits(.digits)*>)" >&2
             exit 1
           fi
-          VERSION="${TAG#v}"
-          {
-            echo "tag=$TAG"
-            echo "version=$VERSION"
-            echo "jar=$JAR_BASENAME-$VERSION-$CLASSIFIER.jar"
-          } >> "$GITHUB_OUTPUT"
+          python3 - "$TAG" << 'PY'
+          import base64
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
 
-          status=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
-          case "$status" in
-            200)
-              echo "Release $TAG already exists"
-              echo "published=true" >> "$GITHUB_OUTPUT"
-              ;;
-            404)
-              echo "published=false" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "ERROR: release lookup for $TAG returned HTTP $status" >&2
-              exit 1
-              ;;
-          esac
+          tag = sys.argv[1]
+          version = tag.removeprefix("v")
+          jar = f"{os.environ['JAR_BASENAME']}-{version}-{os.environ['CLASSIFIER']}.jar"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          secret = os.environ["GH_TOKEN"]
+          releases = f"{os.environ['GITHUB_API_URL']}/repos/{repo}/releases"
+          github_headers = {"Authorization": f"Bearer {secret}", "Accept": "application/vnd.github+json"}
+
+          def request(url, headers):
+              return urlopen(Request(url, headers=headers), timeout=30)
+
+          try:
+              with request(f"{releases}/tags/{tag}", github_headers) as response:
+                  release = json.load(response)
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              release = None
+              page = 1
+              while True:
+                  with request(f"{releases}?per_page=100&page={page}", github_headers) as response:
+                      entries = json.load(response)
+                  matches = [entry for entry in entries if entry["tag_name"] == tag]
+                  if len(matches) > 1:
+                      sys.exit(f"Multiple GitHub releases match {tag}; resolve them before retrying")
+                  if matches or len(entries) < 100:
+                      release = matches[0] if matches else None
+                      break
+                  page += 1
+
+          bundle = None
+          stale_asset = None
+          if release is not None:
+              if release["tag_name"] != tag or type(release["draft"]) is not bool:
+                  sys.exit(f"Invalid GitHub release response for {tag}")
+              for asset in release["assets"]:
+                  if asset["name"] == jar:
+                      if asset["state"] == "uploaded" and asset["size"] > 0:
+                          bundle = asset
+                      else:
+                          stale_asset = asset["id"]
+              if bundle is None and release.get("immutable"):
+                  sys.exit(f"Immutable GitHub release {release['id']} for {tag} is missing {jar}")
+
+          complete = release is not None and not release["draft"] and bundle is not None
+          digest = ""
+          aliases = []
+          if not complete:
+              registry = os.environ["REGISTRY_URL"]
+              image = repo.lower()
+              query = urlencode({"service": "ghcr.io", "scope": f"repository:{image}:pull"})
+              credentials = base64.b64encode(f"{os.environ['GITHUB_ACTOR']}:{secret}".encode()).decode()
+              with request(f"{registry}/token?{query}", {"Authorization": f"Basic {credentials}"}) as response:
+                  registry_token = json.load(response)["token"]
+
+              def manifest(reference):
+                  try:
+                      with request(f"{registry}/v2/{image}/manifests/{reference}", {
+                          "Authorization": f"Bearer {registry_token}",
+                          "Accept": "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
+                      }) as response:
+                          value = response.headers.get("Docker-Content-Digest", "")
+                          if not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+                              sys.exit(f"GHCR returned no valid manifest digest for {image}:{reference}")
+                          return value
+                  except HTTPError as error:
+                      if error.code == 404 and json.load(error)["errors"][0]["code"] in (
+                          "MANIFEST_UNKNOWN", "NAME_UNKNOWN",
+                      ):
+                          return ""
+                      raise
+
+              version_digest = manifest(version)
+              tag_digest = manifest(tag)
+              if version_digest and tag_digest and version_digest != tag_digest:
+                  sys.exit(f"GHCR tags {image}:{version} and {image}:{tag} point to different digests")
+              digest = tag_digest or version_digest
+              if digest:
+                  latest = manifest("latest")
+                  if latest and latest != digest and release is None:
+                      sys.exit(f"GHCR {image}:latest points elsewhere; registry state cannot show whether {tag} previously updated it")
+                  aliases = [ref for ref, value in ((version, version_digest), (tag, tag_digest), ("latest", latest)) if not value]
+                  print(f"Reusing GHCR image {image}@{digest}")
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              print(f"tag={tag}", f"version={version}", f"jar={jar}",
+                    f"complete={str(complete).lower()}", f"image_digest={digest}",
+                    f"aliases={' '.join(aliases)}", f"build_jar={str(not complete and (bundle is None or not digest)).lower()}",
+                    sep="\n", file=output)
+              if release is not None:
+                  print(f"release_id={int(release['id'])}", f"draft={str(release['draft']).lower()}", sep="\n", file=output)
+                  if bundle is None:
+                      print(f"upload_url={release['upload_url'].split('{', 1)[0]}", file=output)
+                      if stale_asset is not None:
+                          print(f"stale_asset={int(stale_asset)}", file=output)
+          PY
 
       - name: Checkout tag
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.build_jar == 'true' }}
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.release.outputs.tag }}
           fetch-depth: 0
 
       - name: Set up JDK 21
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.build_jar == 'true' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -90,7 +174,7 @@ jobs:
           cache: gradle
 
       - name: Build bundle jar (shadowJar only)
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.build_jar == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +182,7 @@ jobs:
           test -f "build/libs/${{ steps.release.outputs.jar }}"
 
       - name: Upload workflow artifact
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.build_jar == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.release.outputs.jar }}
@@ -106,7 +190,7 @@ jobs:
           if-no-files-found: error
 
       - name: Log in to GitHub Container Registry
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.complete == 'false' && (steps.release.outputs.image_digest == '' || steps.release.outputs.aliases != '') }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -114,11 +198,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.complete == 'false' && (steps.release.outputs.image_digest == '' || steps.release.outputs.aliases != '') }}
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.complete == 'false' && steps.release.outputs.image_digest == '' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -136,8 +220,49 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.release.outputs.tag }}
             ghcr.io/${{ github.repository }}:latest
 
+      - name: Restore missing image tags
+        if: ${{ steps.release.outputs.aliases != '' }}
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.release.outputs.image_digest }}
+          ALIASES: ${{ steps.release.outputs.aliases }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          read -ra aliases <<< "$ALIASES"
+          for alias in "${aliases[@]}"; do
+            docker buildx imagetools create --tag "$image:$alias" "$image@$IMAGE_DIGEST"
+          done
+
+      - name: Repair existing GitHub Release
+        if: ${{ steps.release.outputs.complete == 'false' && steps.release.outputs.release_id != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          DRAFT: ${{ steps.release.outputs.draft }}
+          UPLOAD_URL: ${{ steps.release.outputs.upload_url }}
+          STALE_ASSET: ${{ steps.release.outputs.stale_asset }}
+          JAR: ${{ steps.release.outputs.jar }}
+        run: |
+          set -euo pipefail
+          api_url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases"
+          headers=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          if [ -n "$UPLOAD_URL" ]; then
+            if [ -n "$STALE_ASSET" ]; then
+              curl -fsS --max-time 30 "${headers[@]}" -X DELETE "$api_url/assets/$STALE_ASSET"
+            fi
+            curl --fail-with-body -sS --max-time 300 "${headers[@]}" -H 'Content-Type: application/java-archive' \
+              --data-binary "@build/libs/$JAR" "$UPLOAD_URL?name=$JAR" |
+              jq -e --arg jar "$JAR" '.name == $jar and .state == "uploaded" and .size > 0'
+          fi
+          if [ "$DRAFT" = true ]; then
+            curl --fail-with-body -sS --max-time 30 "${headers[@]}" -X PATCH -H 'Content-Type: application/json' \
+              -d '{"draft":false}' "$api_url/$RELEASE_ID" | jq -e '.draft == false'
+          fi
+
       - name: Create GitHub Release (bundle + docker)
-        if: ${{ steps.release.outputs.published == 'false' }}
+        if: ${{ steps.release.outputs.complete == 'false' && steps.release.outputs.release_id == '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.tag }}
