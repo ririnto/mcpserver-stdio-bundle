@@ -8,18 +8,21 @@ Use synthetic examples and remove credentials, personal paths, and private logs 
 
 ## Build and checks
 
-Install JDK 21 and use the checked-in Gradle wrapper.
+Install JDK 21, set `JAVA_HOME` to its installation directory, and use the checked-in Gradle wrapper.
+Install Python 3.11 or later for the stdio smoke check.
 Set `MCP_VERSION` to a published dependency version, such as `253.28294.334`.
 
 ```sh
 MCP_VERSION=253.28294.334
 ./gradlew --no-daemon clean build -PmcpVersion="$MCP_VERSION"
 test -f "build/libs/mcpserver-stdio-${MCP_VERSION}-bundle.jar"
+python3 tests/stdio_smoke.py --java "$JAVA_HOME/bin/java" "build/libs/mcpserver-stdio-${MCP_VERSION}-bundle.jar"
 git diff --check
 ```
 
-This repository bundles an upstream runtime and contains no application source or test suite.
-Gradle build success proves packaging, without proving a live IDE connection.
+This repository bundles an upstream runtime.
+The smoke check runs the built JAR against a loopback SSE fixture.
+It checks MCP initialization and a clean process exit after stdin closes.
 Report commands, outcomes, tested versions, and coverage in the [PR template](.github/pull_request_template.md).
 Mark unavailable or excluded checks as NOTRUN with a reason.
 Use the [README](README.md#build-from-source) for local JAR and Docker build commands.
