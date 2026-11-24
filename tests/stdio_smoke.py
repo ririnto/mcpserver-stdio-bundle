@@ -1,5 +1,3 @@
-"""Exercise the bundle's stdio lifecycle against a loopback SSE server."""
-
 import json
 import subprocess
 from argparse import ArgumentParser
@@ -137,7 +135,9 @@ def _smoke(jar: Path, java: Path) -> None:
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description=__doc__)
+    parser = ArgumentParser(
+        description="Exercise the bundle's stdio lifecycle against a loopback SSE server."
+    )
     parser.add_argument("jar", type=Path)
     parser.add_argument("--java", type=Path, required=True)
     args = parser.parse_args()
